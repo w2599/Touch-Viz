@@ -22,6 +22,13 @@ ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
 TVZPrefs_LIBRARIES += roothide
 endif
 
+# 发布构建优先减小体积，保留现有架构和所有设置功能。
+ifeq ($(DEBUG),0)
+TVZPrefs_CFLAGS += -Oz
+TVZPrefs_SWIFTFLAGS += -Osize
+TVZPrefs_LDFLAGS += -Wl,-dead_strip
+endif
+
 TVZPrefs_CFLAGS += -fobjc-arc
 TVZPrefs_CFLAGS += -I..
 TVZPrefs_CFLAGS += -DPACKAGE_VERSION=\"$(PACKAGE_VERSION)\"
@@ -30,20 +37,14 @@ ifeq ($(THEOS_DEVICE_SIMULATOR),1)
 TVZPrefs_CFLAGS += -DIPHONE_SIMULATOR_ROOT=\"$(IPHONE_SIMULATOR_ROOT)\"
 endif
 
-# swift-create-xcframework --no-debug-symbols --static-library --platform ios --xc-setting ARCHS="arm64 arm64e" --clean SwiftUIIntrospect
-
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
 TVZPrefs_LDFLAGS += -FFrameworks/_Simulator
 TVZPrefs_LDFLAGS += -FFrameworks/_Simulator/MCEmojiPicker.xcframework/ios-arm64_x86_64-simulator -framework MCEmojiPicker
-TVZPrefs_LDFLAGS += -FFrameworks/_Simulator/SwiftUIIntrospect.xcframework/ios-arm64_x86_64-simulator -framework SwiftUIIntrospect
 TVZPrefs_SWIFTFLAGS += -FFrameworks/_Simulator/MCEmojiPicker.xcframework/ios-arm64_x86_64-simulator -framework MCEmojiPicker
-TVZPrefs_SWIFTFLAGS += -FFrameworks/_Simulator/SwiftUIIntrospect.xcframework/ios-arm64_x86_64-simulator -framework SwiftUIIntrospect
 else
 TVZPrefs_LDFLAGS += -FFrameworks
 TVZPrefs_LDFLAGS += -FFrameworks/MCEmojiPicker.xcframework/ios-arm64_arm64e -framework MCEmojiPicker
-TVZPrefs_LDFLAGS += -FFrameworks/SwiftUIIntrospect.xcframework/ios-arm64_arm64e -framework SwiftUIIntrospect
 TVZPrefs_SWIFTFLAGS += -FFrameworks/MCEmojiPicker.xcframework/ios-arm64_arm64e -framework MCEmojiPicker
-TVZPrefs_SWIFTFLAGS += -FFrameworks/SwiftUIIntrospect.xcframework/ios-arm64_arm64e -framework SwiftUIIntrospect
 endif
 
 TVZPrefs_FRAMEWORKS += UIKit

@@ -1,4 +1,3 @@
-import Combine
 import MCEmojiPicker
 import SwiftUI
 
@@ -110,12 +109,10 @@ struct TVZRootView: View {
     @State var hasFillImage = false
     @State var fillImage: UIImage?
 
-    private let scrollViewSubject: CurrentValueSubject<UIScrollView?, Never>
     private let feedbackGenerator: UINotificationFeedbackGenerator = UINotificationFeedbackGenerator()
 
-    init(scrollViewSubject: CurrentValueSubject<UIScrollView?, Never>) {
-        self.scrollViewSubject = scrollViewSubject
-    }
+    // 使用当前偏好创建设置视图。
+    init() {}
 
     func reload() {
         let fillColorString = TVZUserDefaults.standard.string(forKey: "fillColorString") ?? "235,59,90,0.5"
@@ -638,12 +635,6 @@ struct TVZRootView: View {
         )
         .onAppear {
             reload()
-        }
-        .introspect(.list, on: .iOS(.v13, .v14, .v15)) {
-            scrollViewSubject.send($0)
-        }
-        .introspect(.list, on: .iOS(.v16, .v17, .v18)) {
-            scrollViewSubject.send($0)
         }
     }
 
