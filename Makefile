@@ -33,7 +33,6 @@ TouchViz_FILES += libroot/dyn.c
 endif
 
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
-TouchViz_FILES += libroot/dyn.c
 TouchViz_LIBRARIES += roothide
 endif
 

@@ -5,7 +5,20 @@
 #import <Foundation/NSUUID.h>
 #import <HBLog.h>
 
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE) && !TARGET_OS_SIMULATOR
+#import <roothide.h>
+#else
 #import <libroot.h>
+#endif
+
+// 按当前打包方案转换资源路径，模拟器保留原有重定向。
+static NSString *TVZJailbreakPath(NSString *path) {
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE) && !TARGET_OS_SIMULATOR
+    return jbroot(path);
+#else
+    return JBROOT_PATH_NSSTRING(path);
+#endif
+}
 
 @implementation NSBundle (TouchViz)
 
@@ -16,7 +29,7 @@
       NSString *tweakBundlePath = [[NSBundle mainBundle] pathForResource:@"TVZPrefs"
                                                                   ofType:@"bundle"];
       NSString *aliasBundlePath;
-      aliasBundlePath = JBROOT_PATH_NSSTRING(@"/Library/PreferenceBundles/TVZPrefs.bundle");
+      aliasBundlePath = TVZJailbreakPath(@"/Library/PreferenceBundles/TVZPrefs.bundle");
       bundle = [NSBundle bundleWithPath:tweakBundlePath ?: aliasBundlePath];
 #if TARGET_IPHONE_SIMULATOR
       if (!bundle) {
@@ -37,7 +50,7 @@
     static NSString *path = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-      path = JBROOT_PATH_NSSTRING(@"/var/mobile/Library/Touch-Viz");
+      path = TVZJailbreakPath(@"/var/mobile/Library/Touch-Viz");
 #if DEBUG
       HBLogWarn(@"[Touch-Viz] Fill image root: %@", path);
 #endif
@@ -63,25 +76,31 @@
     return image;
 }
 
+// 按路径和文件属性复用图片，切换文件或修改内容时重新加载。
 + (UIImage *)tvz_fillImageNamed:(NSString *)name {
+    static NSString *gFillImagePath = nil;
+    static NSDate *gLastModified = nil;
+    static NSNumber *gFileSize = nil;
+    static UIImage *gFillImage = nil;
     if (!name || [name isEqualToString:@"default.png"]) {
+        gFillImagePath = nil;
+        gLastModified = nil;
+        gFileSize = nil;
+        gFillImage = nil;
         return [self tvz_defaultFillImage];
     }
-    static NSTimeInterval gLastModified = 0;
-    static UIImage *gFillImage = nil;
     NSString *imagePath = [[self tvz_fillImageRoot] stringByAppendingPathComponent:name];
-    if (gFillImage) {
-        NSDictionary *imageAttrs = [[NSFileManager defaultManager] attributesOfItemAtPath:imagePath error:nil];
-        if (imageAttrs) {
-            NSTimeInterval imageModified = [imageAttrs[NSFileModificationDate] timeIntervalSince1970];
-            if (imageModified > gLastModified) {
-                gLastModified = imageModified;
-            } else {
-                return gFillImage;
-            }
-        }
+    NSDictionary *imageAttrs = [[NSFileManager defaultManager] attributesOfItemAtPath:imagePath error:nil];
+    NSDate *imageModified = imageAttrs[NSFileModificationDate];
+    NSNumber *imageSize = imageAttrs[NSFileSize];
+    if (gFillImage && [imagePath isEqualToString:gFillImagePath]
+        && [imageModified isEqualToDate:gLastModified] && [imageSize isEqualToNumber:gFileSize]) {
+        return gFillImage;
     }
-    gFillImage = [UIImage imageWithContentsOfFile:imagePath];
+    gFillImage = imageAttrs ? [UIImage imageWithContentsOfFile:imagePath] : nil;
+    gFillImagePath = [imagePath copy];
+    gLastModified = imageModified;
+    gFileSize = imageSize;
     return gFillImage ?: [self tvz_defaultFillImage];
 }
 

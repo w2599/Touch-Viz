@@ -21,7 +21,7 @@ ifeq ($(THEOS_DEVICE_SIMULATOR),1)
 CCTouchViz_FILES += ../libroot/dyn.c
 endif
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
-CCTouchViz_FILES += ../libroot/dyn.c
+CCTouchViz_LIBRARIES += roothide
 endif
 
 CCTouchViz_CFLAGS += -fobjc-arc

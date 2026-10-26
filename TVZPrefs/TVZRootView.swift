@@ -92,8 +92,15 @@ struct TVZRootView: View {
     var disableOverride: Bool = false
 
     @State var isPresentingResetPrompt = false
-    @State var isShowingEnableOverrideHint = false
-    @State var isShowingDisableOverrideHint = false
+
+    // 直接随设置变化更新提示，避免空闲时轮询。
+    var isShowingEnableOverrideHint: Bool {
+        isEnabled && isRecordingOnly && enableOverride
+    }
+
+    var isShowingDisableOverrideHint: Bool {
+        isEnabled && !isRecordingOnly && disableOverride
+    }
 
     @AppStorage("selectedEmoji", store: TVZUserDefaults.standard)
     var selectedEmoji: String = ""
@@ -104,7 +111,6 @@ struct TVZRootView: View {
     @State var fillImage: UIImage?
 
     private let scrollViewSubject: CurrentValueSubject<UIScrollView?, Never>
-    private let timer = Timer.publish(every: 1, on: .main, in: .default).autoconnect()
     private let feedbackGenerator: UINotificationFeedbackGenerator = UINotificationFeedbackGenerator()
 
     init(scrollViewSubject: CurrentValueSubject<UIScrollView?, Never>) {
@@ -129,11 +135,6 @@ struct TVZRootView: View {
 
         fillImage = Bundle.tvz_fillImageNamed(imageFillName)
         hasFillImage = fillImage != nil && imageFillName != Self.defaultFillImageName
-    }
-
-    func reloadOverrides() {
-        isShowingEnableOverrideHint = isEnabled && isRecordingOnly && enableOverride
-        isShowingDisableOverrideHint = isEnabled && !isRecordingOnly && disableOverride
     }
 
     var body: some View {
@@ -553,7 +554,6 @@ struct TVZRootView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 withAnimation {
                     imageFillName = Bundle.tvz_saveFillImage(with: emoji.render(size: String.nativeEmojiSize)) ?? Self.defaultFillImageName
-                    TVZUserDefaults.standard.darwinNotify()
                     reload()
                 }
             }
@@ -638,12 +638,6 @@ struct TVZRootView: View {
         )
         .onAppear {
             reload()
-            reloadOverrides()
-        }
-        .onReceive(timer) { _ in
-            withAnimation {
-                reloadOverrides()
-            }
         }
         .introspect(.list, on: .iOS(.v13, .v14, .v15)) {
             scrollViewSubject.send($0)
@@ -653,6 +647,7 @@ struct TVZRootView: View {
         }
     }
 
+    // 保存所选图片，偏好写入负责发送一次更新通知。
     private func fileImporterResultHandler(result: Result<[URL], Error>) {
         do {
             switch result {
@@ -663,7 +658,6 @@ struct TVZRootView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     withAnimation {
                         imageFillName = Bundle.tvz_saveFillImage(withPath: url.path) ?? Self.defaultFillImageName
-                        TVZUserDefaults.standard.darwinNotify()
                         reload()
                     }
                 }

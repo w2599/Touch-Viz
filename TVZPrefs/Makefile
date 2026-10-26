@@ -19,7 +19,7 @@ ifeq ($(THEOS_DEVICE_SIMULATOR),1)
 TVZPrefs_FILES += ../libroot/dyn.c
 endif
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
-TVZPrefs_FILES += ../libroot/dyn.c
+TVZPrefs_LIBRARIES += roothide
 endif
 
 TVZPrefs_CFLAGS += -fobjc-arc
