@@ -49,10 +49,12 @@
 
 @implementation UIColor (TVZ)
 
+// 解析配置中的颜色。
 + (UIColor *)tvz_colorWithRGBAString:(NSString *)rgbaString {
     return [self tvz_colorWithRGBAString:rgbaString extraAlpha:1.0];
 }
 
+// 解析颜色并叠加透明度。
 + (UIColor *)tvz_colorWithRGBAString:(NSString *)rgbaString extraAlpha:(CGFloat)extraAlpha {
     NSArray<NSString *> *components = [rgbaString componentsSeparatedByString:@","];
     if (components.count < 3) {
@@ -82,7 +84,12 @@ static BOOL _gDisableOverrideWhenRecording = NO;
 static BOOL _gIsRecording = NO;
 static BOOL _gIsBroadcasting = NO;
 static BOOL _gIsInReachability = NO;
+static BOOL _gVisualizationActive = NO;
+static BOOL _gVisualPrefsDirty = YES;
 
+static void ApplyVisualPrefs(void);
+
+// 缓存设备的主屏幕按钮类型。
 static NSInteger HomeButtonType(void) {
     typedef CFTypeRef (*MGCopyAnswerFunction)(CFStringRef key);
 
@@ -102,10 +109,12 @@ static NSInteger HomeButtonType(void) {
     return homeButtonType;
 }
 
+// 判断是否需要兼容实体主屏幕按钮。
 static BOOL IsRealHomeButtonDevice(void) {
     return HomeButtonType() == 1;
 }
 
+// 按状态通知读取屏幕捕获状态。
 static BOOL IsAnyScreenInRecording(void) {
     for (UIScreen *screen in [UIScreen screens]) {
         if ([screen isCaptured]) {
@@ -115,6 +124,7 @@ static BOOL IsAnyScreenInRecording(void) {
     return NO;
 }
 
+// 合并偏好、临时覆盖和录屏状态。
 static BOOL IsEnabled(void) {
     if (!_gEnabled || _gIsInReachability) {
         return NO;
@@ -140,31 +150,39 @@ static BOOL IsEnabled(void) {
     return YES;
 }
 
-static BOOL ShouldKeepSystemGestureTouchStreamSending(void) {
-    return IsEnabled() || [_gWindow hasAnyTouch];
-}
-
+// 仅在状态通知到来时更新窗口，停用时切断所有可视化工作。
 static void ReloadStats(void) {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ ReloadStats(); });
+        return;
+    }
+
     _gIsRecording = IsAnyScreenInRecording();
     if (!_gIsRecording) _gIsBroadcasting = NO;
     _gIsInReachability = [[%c(SBReachabilityManager) sharedInstance] reachabilityModeActive];
 
-    BOOL isEnabled = IsEnabled();
-    _gWindowScene.touchVisualizerEnabled = isEnabled;
-    if (!isEnabled) {
-        _gWindow.quickPathEnabled = NO;
-        _gWindow.morphEnabled = NO;
-        _gWindow.trackingEnabled = NO;
+    if (!IsEnabled() || !_gWindowScene) {
+        _gVisualizationActive = NO;
+        _gWindowScene.touchVisualizerEnabled = NO;
+        return;
     }
 
-    HBLogDebug(@"Is Recording: %@, Is Broadcasting: %@, Is In Reachability: %@, Is Enabled: %@",
-                _gIsRecording ? @"YES" : @"NO",
-                _gIsBroadcasting ? @"YES" : @"NO",
-                _gIsInReachability ? @"YES" : @"NO",
-                _gWindowScene.touchVisualizerEnabled ? @"YES" : @"NO");
+    if (!_gWindow) {
+        _gWindow = _gWindowScene.touchVisualizerWindow;
+        _gTouchConfig = _gWindow.touchContactConfig;
+        _gRippleConfig = _gWindow.touchRippleConfig;
+        _gVisualPrefsDirty = YES;
+    }
+    if (_gVisualPrefsDirty) {
+        ApplyVisualPrefs();
+        _gVisualPrefsDirty = NO;
+    }
+    _gWindowScene.touchVisualizerEnabled = YES;
+    _gVisualizationActive = _gWindow != nil;
 }
 
-static void ReloadPrefs(void) {
+// 延迟加载外观配置，未录屏时不解码图片或创建轨迹界面。
+static void ApplyVisualPrefs(void) {
     _gWindow.quickPathEnabled = tvzBool(@"useQuickPathEffect");
     _gWindow.morphEnabled = tvzBool(@"useMorphEffect");
     _gWindow.trackingEnabled = tvzBool(@"useTrackingEffect");
@@ -262,6 +280,15 @@ static void ReloadPrefs(void) {
     _gWindow.touchContactConfig = _gTouchConfig;
     _gWindow.touchRippleConfig = _gRippleConfig;
 
+}
+
+// 偏好变化只更新开关并标记外观，在下次启用时应用。
+static void ReloadPrefs(void) {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ ReloadPrefs(); });
+        return;
+    }
+    _gVisualPrefsDirty = YES;
     _gEnabled = tvzBool(@"isEnabled");
     _gEnabledOnlyWhenRecording = tvzBool(@"isRecordingOnly");
 
@@ -278,10 +305,12 @@ __attribute__((visibility("hidden")))
 
 @implementation TVZReachabilityObserver
 
+// 便捷访问开始时同步可视化状态。
 - (void)handleWillBeginReachabilityAnimation {
     ReloadStats();
 }
 
+// 便捷访问结束时恢复可视化状态。
 - (void)handleDidEndReachabilityAnimation {
     ReloadStats();
 }
@@ -309,8 +338,10 @@ struct Block {
     struct BlockDescriptor *descriptor;
 };
 
+// 安全读取回调签名，兼容调用方未传回调的情况。
 static NSString *BlockSig(id blockObj)
 {
+    if (!blockObj) return nil;
     struct Block *block = (__bridge struct Block *)blockObj;
     struct BlockDescriptor *descriptor = block->descriptor;
 
@@ -335,12 +366,14 @@ static NSString *BlockSig(id blockObj)
 
 %property (nonatomic, copy) NSString *tvz_inBroadcastingExtensionIdentifier;
 
+// 记录广播扩展以排除长截图工具。
 - (void)setupSystemBroadcastWithExtension:(NSString *)arg1 handler:(id)arg2 {
     %orig;
     self.tvz_inBroadcastingExtensionIdentifier = arg1;
     HBLogDebug(@"setupSystemBroadcastWithExtension: %@", arg1);
 }
 
+// 广播完成回调仅在主线程更新可视化状态。
 - (void)startSystemBroadcastWithHandler:(void (^)(NSError *))arg1 {
     NSString *sig1 = BlockSig(arg1);
     if (![sig1 isEqualToString:@"v16@?0@\"NSError\"8"]) {
@@ -348,11 +381,14 @@ static NSString *BlockSig(id blockObj)
         return;
     }
     void (^handler)(NSError *) = ^(NSError *error) {
-      _gIsBroadcasting = (!error 
-        && self.tvz_inBroadcastingExtensionIdentifier != nil 
+      BOOL suppressVisualization = (!error
+        && self.tvz_inBroadcastingExtensionIdentifier != nil
         && [[TVZUserDefaults longScreenshotterKeys] containsObject:self.tvz_inBroadcastingExtensionIdentifier]
       );
-      ReloadStats();
+      dispatch_async(dispatch_get_main_queue(), ^{
+        _gIsBroadcasting = suppressVisualization;
+        ReloadStats();
+      });
       if (arg1) {
         arg1(error);
       }
@@ -366,13 +402,15 @@ static NSString *BlockSig(id blockObj)
 
 %property (nonatomic, copy) NSString *tvz_inBroadcastingExtensionIdentifier;
 
+// 保存实际初始化实例的广播扩展。
 - (instancetype)initWithExtensionBundleID:(NSString *)arg1 broadcastURL:(id)arg2 {
     RPBroadcastController *result = %orig;
-    self.tvz_inBroadcastingExtensionIdentifier = arg1;
+    result.tvz_inBroadcastingExtensionIdentifier = arg1;
     HBLogDebug(@"initWithExtensionBundleID: %@", arg1);
     return result;
 }
 
+// 广播完成回调仅在主线程更新可视化状态。
 - (void)startSystemBroadcastWithHandler:(void (^)(NSError *))arg1 {
     NSString *sig1 = BlockSig(arg1);
     if (![sig1 isEqualToString:@"v16@?0@\"NSError\"8"]) {
@@ -380,11 +418,14 @@ static NSString *BlockSig(id blockObj)
         return;
     }
     void (^handler)(NSError *) = ^(NSError *error) {
-      _gIsBroadcasting = (!error 
-        && self.tvz_inBroadcastingExtensionIdentifier != nil 
+      BOOL suppressVisualization = (!error
+        && self.tvz_inBroadcastingExtensionIdentifier != nil
         && [[TVZUserDefaults longScreenshotterKeys] containsObject:self.tvz_inBroadcastingExtensionIdentifier]
       );
-      ReloadStats();
+      dispatch_async(dispatch_get_main_queue(), ^{
+        _gIsBroadcasting = suppressVisualization;
+        ReloadStats();
+      });
       if (arg1) {
         arg1(error);
       }
@@ -396,10 +437,11 @@ static NSString *BlockSig(id blockObj)
 
 %hook UIWindowScene
 
+// 仅在 SpringBoard 场景变化时执行初始化。
 - (void)_delegate_windowDidBecomeVisible:(id)arg1 {
     %orig;
 
-    if (![NSStringFromClass([self class]) hasPrefix:@"SB"]) {
+    if (self == _gWindowScene || ![NSStringFromClass([self class]) hasPrefix:@"SB"]) {
         return;
     }
 
@@ -409,26 +451,34 @@ static NSString *BlockSig(id blockObj)
 }
 
 %new
+// 切换场景并延迟创建可视化窗口。
 - (void)touchviz_reload {
-    _gWindowScene = self;
-    _gWindow = self.touchVisualizerWindow;
-    _gTouchConfig = _gWindow.touchContactConfig;
-    _gRippleConfig = _gWindow.touchRippleConfig;
+    if (_gWindowScene == self) return;
 
-    ReloadPrefs();
+    _gVisualizationActive = NO;
+    _gWindowScene.touchVisualizerEnabled = NO;
+    _gWindowScene = self;
+    _gWindow = nil;
+    _gTouchConfig = nil;
+    _gRippleConfig = nil;
 
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
       [self touchviz_setup];
     });
+    ReloadPrefs();
 }
 
 %new
+// 注册状态通知，不使用轮询。
 - (void)touchviz_setup {
-    [NSNotificationCenter.defaultCenter addObserver:self
-                                           selector:@selector(touchviz_screenCapturedDidChange:)
-                                               name:UIScreenCapturedDidChangeNotification
-                                             object:nil];
+    // 独立于场景生命周期，避免场景更换后丢失录屏通知。
+    static id captureObserver = nil;
+    if (!captureObserver) captureObserver = [NSNotificationCenter.defaultCenter
+        addObserverForName:UIScreenCapturedDidChangeNotification
+                    object:nil
+                     queue:NSOperationQueue.mainQueue
+                usingBlock:^(NSNotification *notification) { ReloadStats(); }];
 
     static TVZReachabilityObserver *_gReachabilityObserver = nil;
     _gReachabilityObserver = [TVZReachabilityObserver new];
@@ -440,24 +490,19 @@ static NSString *BlockSig(id blockObj)
     });
 }
 
-%new
-- (void)touchviz_screenCapturedDidChange:(NSNotification *)notification {
-    ReloadStats();
-}
-
 %end
 
 %hook _UISystemGestureWindow
 
+// 停用时只调用系统实现并检查缓存开关。
 - (void)sendEvent:(UIEvent *)event {
     %orig;
 
-    if (event.type != UIEventTypeTouches) {
-        return;
-    }
+    if (!_gVisualizationActive) return;
+    if (event.type != UIEventTypeTouches) return;
 
-    if (IsEnabled() || [_gWindow hasAnyTouch]) {
-        [_gWindow sendTouchEvent:event];
+    [_gWindow sendTouchEvent:event];
+    if (_gWindow.quickPathEnabled) {
         [_gWindow sendQuickPathEvent:event];
     }
 }
@@ -470,9 +515,10 @@ static NSString *BlockSig(id blockObj)
 
 %hook __UISystemGestureManager
 
+// 仅在可视化启用期间延续旧设备的触摸流。
 - (unsigned char)_dispatchModeForExternalGestureCompletion {
     unsigned char dispatchMode = %orig;
-    if (dispatchMode == 1 && ShouldKeepSystemGestureTouchStreamSending()) {
+    if (dispatchMode == 1 && _gVisualizationActive) {
         return 2;
     }
     return dispatchMode;

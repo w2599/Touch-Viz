@@ -12,7 +12,6 @@ __attribute__((visibility("hidden")))
 @interface LNTouchImageView : UIImageView
 
 @property(nonatomic) NSTimeInterval timestamp;
-@property(nonatomic) BOOL shouldAutomaticallyRemoveAfterTimeout;
-@property(nonatomic, getter=isFadingOut) BOOL fadingOut;
+@property(nonatomic) NSTimeInterval lastRippleTimestamp;
 
 @end

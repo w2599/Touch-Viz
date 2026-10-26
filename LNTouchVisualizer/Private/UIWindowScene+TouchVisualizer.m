@@ -20,6 +20,7 @@ __attribute__((visibility("hidden")))
 @implementation _LNSceneTouchVisualizerWindow
 
 #ifndef LNPopupControllerEnforceStrictClean
+// 禁止覆盖层改变状态栏或成为主窗口。
 + (void)load {
     @autoreleasepool {
         NSMutableString *name = [@"_" mutableCopy];
@@ -39,61 +40,43 @@ __attribute__((visibility("hidden")))
     }
 }
 
-//_canAffectStatusBarAppearance
+// 不影响状态栏外观。
 - (BOOL)_cASBA {
     return NO;
 }
 
-//_canBecomeKeyWindow
+// 不允许成为主窗口。
 - (BOOL)_cBKW {
     return NO;
 }
 #endif
 
+// 场景窗口直接承载触点，避免额外创建覆盖窗口。
 - (UIWindow *)overlayWindow {
     return self;
 }
 
 @end
 
-__attribute__((visibility("hidden")))
-@interface UIWindow (TouchVisualizerForwarding)
-@end
-@implementation UIWindow (TouchVisualizerForwarding)
-
-+ (void)load {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-      Method m1 = class_getInstanceMethod(self, @selector(sendEvent:));
-      Method m2 = class_getInstanceMethod(self, @selector(__ln_vis_sendEvent:));
-      method_exchangeImplementations(m1, m2);
-    });
-}
-
-- (void)__ln_vis_sendEvent:(UIEvent *)event {
-    if ([self isKindOfClass:[_LNSceneTouchVisualizerWindow class]]) {
-        return;
-    }
-
-    if (self.windowScene.touchVisualizerEnabled) {
-        [self.windowScene.touchVisualizerWindow sendEvent:event];
-    }
-
-    [self __ln_vis_sendEvent:event];
-}
-
-@end
-
 @implementation UIWindowScene (TouchVisualizer)
 
+// 仅显式请求窗口时创建停用状态的覆盖层。
 - (LNTouchVisualizerWindow *)touchVisualizerWindow {
     LNTouchVisualizerWindow *rv = objc_getAssociatedObject(self, LNTouchVisualizerWindowKey);
 
-    NSString *processName = [[NSProcessInfo processInfo] processName];
-    if (rv == nil && [processName isEqualToString:@"SpringBoard"]) {
-        rv = [_LNSceneTouchVisualizerWindow new];
+    if (rv != nil) {
+        return rv;
+    }
+    if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
+        rv = [[_LNSceneTouchVisualizerWindow alloc] initWithFrame:UIScreen.mainScreen.bounds
+                                     touchVisualizationEnabled:NO
+                                              quickPathEnabled:NO
+                                                  morphEnabled:NO
+                                               trackingEnabled:NO
+                                                 contactConfig:nil
+                                                  rippleConfig:nil];
         rv.windowLevel = CGFLOAT_MAX;
-        rv.backgroundColor = [UIColor.greenColor colorWithAlphaComponent:0.0];
+        rv.backgroundColor = UIColor.clearColor;
         rv.hidden = YES;
         rv.userInteractionEnabled = NO;
         rv.frame = UIScreen.mainScreen.bounds;
@@ -105,12 +88,18 @@ __attribute__((visibility("hidden")))
     return rv;
 }
 
+// 停用不创建窗口，并同步关闭全部触摸效果。
 - (void)setTouchVisualizerEnabled:(BOOL)touchVisualizerEnabled {
-    self.touchVisualizerWindow.hidden = touchVisualizerEnabled == NO;
+    LNTouchVisualizerWindow *window = touchVisualizerEnabled ? self.touchVisualizerWindow :
+        objc_getAssociatedObject(self, LNTouchVisualizerWindowKey);
+    window.touchVisualizationEnabled = touchVisualizerEnabled;
+    window.hidden = !touchVisualizerEnabled;
 }
 
+// 查询状态不触发窗口创建。
 - (BOOL)touchVisualizerEnabled {
-    return self.touchVisualizerWindow.hidden == NO;
+    LNTouchVisualizerWindow *window = objc_getAssociatedObject(self, LNTouchVisualizerWindowKey);
+    return window != nil && window.touchVisualizationEnabled && !window.hidden;
 }
 
 @end

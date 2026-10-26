@@ -31,6 +31,8 @@ __attribute__((visibility("hidden")))
 
 - (void)sendTouchEvent:(UIEvent *)event;
 - (BOOL)hasAnyTouch;
+// 立即清空当前触摸和全部动画、延迟任务。
+- (void)resetTouchVisualization;
 
 @end
 
